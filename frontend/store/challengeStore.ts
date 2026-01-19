@@ -24,7 +24,6 @@ export interface ChallengeState {
   totalResets: number;
   bestStreak: number;
   dailyLog: { [dateString: string]: DailyLogEntry };
-  _hasHydrated: boolean;
 }
 
 interface ChallengeActions {
@@ -32,7 +31,6 @@ interface ChallengeActions {
   resetChallenge: () => void;
   checkAndAdvanceDay: () => boolean;
   initializeDay: () => void;
-  setHasHydrated: (state: boolean) => void;
 }
 
 type ChallengeStore = ChallengeState & ChallengeActions;
@@ -62,40 +60,35 @@ const isAllTasksComplete = (tasks: DailyTasks): boolean => {
   );
 };
 
-// Custom storage that works on both web and native
-const customStorage: StateStorage = {
-  getItem: async (name: string): Promise<string | null> => {
-    try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+// Simple storage wrapper that works on both platforms
+const getStorage = (): StateStorage => {
+  // For web, use localStorage directly
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
+    return {
+      getItem: (name: string): string | null => {
         return window.localStorage.getItem(name);
-      }
-      return await AsyncStorage.getItem(name);
-    } catch {
-      return null;
-    }
-  },
-  setItem: async (name: string, value: string): Promise<void> => {
-    try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      },
+      setItem: (name: string, value: string): void => {
         window.localStorage.setItem(name, value);
-      } else {
-        await AsyncStorage.setItem(name, value);
-      }
-    } catch {
-      // Handle error silently
-    }
-  },
-  removeItem: async (name: string): Promise<void> => {
-    try {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      },
+      removeItem: (name: string): void => {
         window.localStorage.removeItem(name);
-      } else {
-        await AsyncStorage.removeItem(name);
-      }
-    } catch {
-      // Handle error silently
-    }
-  },
+      },
+    };
+  }
+  
+  // For native, use AsyncStorage with sync wrapper
+  return {
+    getItem: async (name: string): Promise<string | null> => {
+      return await AsyncStorage.getItem(name);
+    },
+    setItem: async (name: string, value: string): Promise<void> => {
+      await AsyncStorage.setItem(name, value);
+    },
+    removeItem: async (name: string): Promise<void> => {
+      await AsyncStorage.removeItem(name);
+    },
+  };
 };
 
 export const useChallengeStore = create<ChallengeStore>()(
@@ -108,11 +101,6 @@ export const useChallengeStore = create<ChallengeStore>()(
       totalResets: 0,
       bestStreak: 0,
       dailyLog: {},
-      _hasHydrated: false,
-
-      setHasHydrated: (state: boolean) => {
-        set({ _hasHydrated: state });
-      },
 
       // Initialize today's entry if not exists
       initializeDay: () => {
@@ -197,10 +185,8 @@ export const useChallengeStore = create<ChallengeStore>()(
     }),
     {
       name: '75hard-challenge-storage',
-      storage: createJSONStorage(() => customStorage),
-      onRehydrateStorage: () => (state) => {
-        state?.setHasHydrated(true);
-      },
+      storage: createJSONStorage(() => getStorage()),
+      skipHydration: false,
     }
   )
 );
