@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -40,13 +40,10 @@ export default function HomeScreen() {
     toggleTask,
     resetChallenge,
     checkAndAdvanceDay,
-    initializeDay,
-    loadFromStorage,
   } = store;
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Animation values
   const celebrationScale = useSharedValue(0);
@@ -59,16 +56,6 @@ export default function HomeScreen() {
   const todaysTasks = useMemo(() => {
     return dailyLog[today] || createEmptyDayLog();
   }, [dailyLog, today]);
-
-  // Initialize on mount - load from storage then initialize day
-  useEffect(() => {
-    const init = async () => {
-      await loadFromStorage();
-      initializeDay();
-      setIsLoading(false);
-    };
-    init();
-  }, []);
 
   // Count completed tasks
   const completedCount = useMemo(() => {
@@ -156,16 +143,6 @@ export default function HomeScreen() {
 
   const displayDay = currentDay === 0 ? 1 : currentDay;
   const isChallengeComplete = currentDay >= 75 && allComplete;
-
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -337,15 +314,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    color: '#6b7280',
-    fontSize: 16,
   },
   scrollContent: {
     padding: 20,
