@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { Platform } from 'react-native';
 
 // Types
 export interface DailyTasks {
@@ -29,8 +28,7 @@ interface ChallengeActions {
   resetChallenge: () => void;
   checkAndAdvanceDay: () => boolean;
   initializeDay: () => void;
-  loadFromStorage: () => Promise<void>;
-  saveToStorage: () => Promise<void>;
+  setState: (state: Partial<ChallengeState>) => void;
 }
 
 type ChallengeStore = ChallengeState & ChallengeActions;
@@ -60,85 +58,21 @@ const isAllTasksComplete = (tasks: DailyTasks): boolean => {
   );
 };
 
-const STORAGE_KEY = '75hard-challenge-storage';
-
-// Storage helpers
-const storage = {
-  getItem: async (): Promise<ChallengeState | null> => {
-    try {
-      let data: string | null = null;
-      
-      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-        data = window.localStorage.getItem(STORAGE_KEY);
-      } else {
-        // Dynamic import for AsyncStorage on native
-        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-        data = await AsyncStorage.getItem(STORAGE_KEY);
-      }
-      
-      if (data) {
-        return JSON.parse(data);
-      }
-    } catch (e) {
-      console.log('Error loading from storage:', e);
-    }
-    return null;
-  },
-  
-  setItem: async (state: ChallengeState): Promise<void> => {
-    try {
-      const data = JSON.stringify(state);
-      
-      if (Platform.OS === 'web' && typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(STORAGE_KEY, data);
-      } else {
-        const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-        await AsyncStorage.setItem(STORAGE_KEY, data);
-      }
-    } catch (e) {
-      console.log('Error saving to storage:', e);
-    }
-  },
-};
-
-const initialState: ChallengeState = {
+export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
+  // Initial state
   currentDay: 0,
   startDate: null,
   lastCompletedDate: null,
   totalResets: 0,
   bestStreak: 0,
   dailyLog: {},
-};
 
-export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
-  ...initialState,
-
-  loadFromStorage: async () => {
-    const stored = await storage.getItem();
-    if (stored) {
-      set({
-        currentDay: stored.currentDay ?? 0,
-        startDate: stored.startDate ?? null,
-        lastCompletedDate: stored.lastCompletedDate ?? null,
-        totalResets: stored.totalResets ?? 0,
-        bestStreak: stored.bestStreak ?? 0,
-        dailyLog: stored.dailyLog ?? {},
-      });
-    }
+  // Set state from storage
+  setState: (state: Partial<ChallengeState>) => {
+    set(state);
   },
 
-  saveToStorage: async () => {
-    const state = get();
-    await storage.setItem({
-      currentDay: state.currentDay,
-      startDate: state.startDate,
-      lastCompletedDate: state.lastCompletedDate,
-      totalResets: state.totalResets,
-      bestStreak: state.bestStreak,
-      dailyLog: state.dailyLog,
-    });
-  },
-
+  // Initialize today's entry if not exists
   initializeDay: () => {
     const today = getDateString();
     const state = get();
@@ -152,11 +86,10 @@ export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
         currentDay: state.currentDay === 0 ? 1 : state.currentDay,
         startDate: state.startDate || today,
       });
-      // Save after initialization
-      get().saveToStorage();
     }
   },
 
+  // Toggle a task
   toggleTask: (taskKey: keyof DailyTasks) => {
     const today = getDateString();
     const state = get();
@@ -182,11 +115,9 @@ export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
       currentDay: state.currentDay === 0 ? 1 : state.currentDay,
       startDate: state.startDate || today,
     });
-    
-    // Save after toggle
-    get().saveToStorage();
   },
 
+  // Check if day should advance and do it
   checkAndAdvanceDay: () => {
     const state = get();
     const today = getDateString();
@@ -201,14 +132,12 @@ export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
         lastCompletedDate: today,
         bestStreak: newBestStreak,
       });
-      
-      // Save after advancing
-      get().saveToStorage();
       return true;
     }
     return false;
   },
 
+  // Reset challenge
   resetChallenge: () => {
     const state = get();
     const newBestStreak = Math.max(state.bestStreak, state.currentDay);
@@ -221,8 +150,5 @@ export const useChallengeStore = create<ChallengeStore>()((set, get) => ({
       bestStreak: newBestStreak,
       dailyLog: {},
     });
-    
-    // Save after reset
-    get().saveToStorage();
   },
 }));
