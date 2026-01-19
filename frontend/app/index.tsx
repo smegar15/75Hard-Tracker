@@ -7,7 +7,6 @@ import {
   ScrollView,
   Modal,
   Platform,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,7 +38,6 @@ export default function HomeScreen() {
     bestStreak,
     totalResets,
     dailyLog,
-    _hasHydrated,
     toggleTask,
     resetChallenge,
     checkAndAdvanceDay,
@@ -48,6 +46,7 @@ export default function HomeScreen() {
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   // Animation values
   const celebrationScale = useSharedValue(0);
@@ -61,12 +60,15 @@ export default function HomeScreen() {
     return dailyLog[today] || createEmptyDayLog();
   }, [dailyLog, today]);
 
-  // Initialize day on mount after hydration
+  // Initialize day on mount
   useEffect(() => {
-    if (_hasHydrated) {
+    // Small delay to ensure store is ready
+    const timer = setTimeout(() => {
       initializeDay();
-    }
-  }, [_hasHydrated, initializeDay]);
+      setIsReady(true);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [initializeDay]);
 
   // Count completed tasks
   const completedCount = useMemo(() => {
@@ -81,7 +83,6 @@ export default function HomeScreen() {
   }, [todaysTasks]);
 
   const allComplete = completedCount === 6;
-  const wasComplete = todaysTasks.completedAt !== null;
 
   // Handle task toggle
   const handleToggleTask = useCallback(async (taskKey: keyof DailyTasks) => {
@@ -155,18 +156,6 @@ export default function HomeScreen() {
 
   const displayDay = currentDay === 0 ? 1 : currentDay;
   const isChallengeComplete = currentDay >= 75 && allComplete;
-
-  // Show loading state while hydrating
-  if (!_hasHydrated) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#22c55e" />
-          <Text style={styles.loadingText}>Loading...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -338,16 +327,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    color: '#6b7280',
-    marginTop: 12,
-    fontSize: 16,
   },
   scrollContent: {
     padding: 20,
