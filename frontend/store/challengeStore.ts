@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist, createJSONStorage, StateStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Types
 export interface DailyTasks {
@@ -23,23 +24,24 @@ export interface ChallengeState {
   totalResets: number;
   bestStreak: number;
   dailyLog: { [dateString: string]: DailyLogEntry };
+  _hasHydrated: boolean;
 }
 
 interface ChallengeActions {
   toggleTask: (taskKey: keyof DailyTasks) => void;
   resetChallenge: () => void;
-  getTodaysTasks: () => DailyLogEntry;
   checkAndAdvanceDay: () => boolean;
   initializeDay: () => void;
+  setHasHydrated: (state: boolean) => void;
 }
 
 type ChallengeStore = ChallengeState & ChallengeActions;
 
-const getDateString = (date: Date = new Date()): string => {
+export const getDateString = (date: Date = new Date()): string => {
   return date.toISOString().split('T')[0];
 };
 
-const createEmptyDayLog = (): DailyLogEntry => ({
+export const createEmptyDayLog = (): DailyLogEntry => ({
   diet: false,
   workout1: false,
   workout2Outdoor: false,
@@ -60,6 +62,42 @@ const isAllTasksComplete = (tasks: DailyTasks): boolean => {
   );
 };
 
+// Custom storage that works on both web and native
+const customStorage: StateStorage = {
+  getItem: async (name: string): Promise<string | null> => {
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        return window.localStorage.getItem(name);
+      }
+      return await AsyncStorage.getItem(name);
+    } catch {
+      return null;
+    }
+  },
+  setItem: async (name: string, value: string): Promise<void> => {
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.localStorage.setItem(name, value);
+      } else {
+        await AsyncStorage.setItem(name, value);
+      }
+    } catch {
+      // Handle error silently
+    }
+  },
+  removeItem: async (name: string): Promise<void> => {
+    try {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.localStorage.removeItem(name);
+      } else {
+        await AsyncStorage.removeItem(name);
+      }
+    } catch {
+      // Handle error silently
+    }
+  },
+};
+
 export const useChallengeStore = create<ChallengeStore>()(
   persist(
     (set, get) => ({
@@ -70,39 +108,36 @@ export const useChallengeStore = create<ChallengeStore>()(
       totalResets: 0,
       bestStreak: 0,
       dailyLog: {},
+      _hasHydrated: false,
+
+      setHasHydrated: (state: boolean) => {
+        set({ _hasHydrated: state });
+      },
 
       // Initialize today's entry if not exists
       initializeDay: () => {
         const today = getDateString();
-        const { dailyLog, currentDay, startDate } = get();
+        const state = get();
         
-        if (!dailyLog[today]) {
+        if (!state.dailyLog[today]) {
           set({
             dailyLog: {
-              ...dailyLog,
+              ...state.dailyLog,
               [today]: createEmptyDayLog(),
             },
-            // Start challenge if not started
-            currentDay: currentDay === 0 ? 1 : currentDay,
-            startDate: startDate || today,
+            currentDay: state.currentDay === 0 ? 1 : state.currentDay,
+            startDate: state.startDate || today,
           });
         }
-      },
-
-      // Get today's tasks
-      getTodaysTasks: () => {
-        const today = getDateString();
-        const { dailyLog } = get();
-        return dailyLog[today] || createEmptyDayLog();
       },
 
       // Toggle a task
       toggleTask: (taskKey: keyof DailyTasks) => {
         const today = getDateString();
-        const { dailyLog, currentDay, startDate } = get();
+        const state = get();
         
-        const currentDayLog = dailyLog[today] || createEmptyDayLog();
-        const updatedLog = {
+        const currentDayLog = state.dailyLog[today] || createEmptyDayLog();
+        const updatedLog: DailyLogEntry = {
           ...currentDayLog,
           [taskKey]: !currentDayLog[taskKey],
         };
@@ -117,24 +152,23 @@ export const useChallengeStore = create<ChallengeStore>()(
 
         set({
           dailyLog: {
-            ...dailyLog,
+            ...state.dailyLog,
             [today]: updatedLog,
           },
-          // Start challenge if not started
-          currentDay: currentDay === 0 ? 1 : currentDay,
-          startDate: startDate || today,
+          currentDay: state.currentDay === 0 ? 1 : state.currentDay,
+          startDate: state.startDate || today,
         });
       },
 
       // Check if day should advance and do it
       checkAndAdvanceDay: () => {
-        const { dailyLog, currentDay, bestStreak, lastCompletedDate } = get();
+        const state = get();
         const today = getDateString();
-        const todayLog = dailyLog[today];
+        const todayLog = state.dailyLog[today];
 
-        if (todayLog && isAllTasksComplete(todayLog) && lastCompletedDate !== today) {
-          const newDay = currentDay + 1;
-          const newBestStreak = Math.max(bestStreak, currentDay);
+        if (todayLog && isAllTasksComplete(todayLog) && state.lastCompletedDate !== today) {
+          const newDay = state.currentDay + 1;
+          const newBestStreak = Math.max(state.bestStreak, state.currentDay);
           
           set({
             currentDay: newDay > 75 ? 75 : newDay,
@@ -148,14 +182,14 @@ export const useChallengeStore = create<ChallengeStore>()(
 
       // Reset challenge
       resetChallenge: () => {
-        const { totalResets, currentDay, bestStreak } = get();
-        const newBestStreak = Math.max(bestStreak, currentDay);
+        const state = get();
+        const newBestStreak = Math.max(state.bestStreak, state.currentDay);
         
         set({
           currentDay: 0,
           startDate: null,
           lastCompletedDate: null,
-          totalResets: totalResets + 1,
+          totalResets: state.totalResets + 1,
           bestStreak: newBestStreak,
           dailyLog: {},
         });
@@ -163,7 +197,10 @@ export const useChallengeStore = create<ChallengeStore>()(
     }),
     {
       name: '75hard-challenge-storage',
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => customStorage),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true);
+      },
     }
   )
 );
