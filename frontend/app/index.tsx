@@ -30,7 +30,6 @@ const TASKS = [
 ] as const;
 
 export default function HomeScreen() {
-  // Subscribe to entire store to ensure reactivity
   const store = useChallengeStore();
   
   const {
@@ -42,11 +41,12 @@ export default function HomeScreen() {
     resetChallenge,
     checkAndAdvanceDay,
     initializeDay,
+    loadFromStorage,
   } = store;
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
-  const [isReady, setIsReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Animation values
   const celebrationScale = useSharedValue(0);
@@ -60,15 +60,15 @@ export default function HomeScreen() {
     return dailyLog[today] || createEmptyDayLog();
   }, [dailyLog, today]);
 
-  // Initialize day on mount
+  // Initialize on mount - load from storage then initialize day
   useEffect(() => {
-    // Small delay to ensure store is ready
-    const timer = setTimeout(() => {
+    const init = async () => {
+      await loadFromStorage();
       initializeDay();
-      setIsReady(true);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, [initializeDay]);
+      setIsLoading(false);
+    };
+    init();
+  }, []);
 
   // Count completed tasks
   const completedCount = useMemo(() => {
@@ -156,6 +156,16 @@ export default function HomeScreen() {
 
   const displayDay = currentDay === 0 ? 1 : currentDay;
   const isChallengeComplete = currentDay >= 75 && allComplete;
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -327,6 +337,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    color: '#6b7280',
+    fontSize: 16,
   },
   scrollContent: {
     padding: 20,
