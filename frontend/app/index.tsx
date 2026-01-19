@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   Modal,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { useChallengeStore, DailyTasks } from '../store/challengeStore';
+import { useChallengeStore, DailyTasks, getDateString, createEmptyDayLog } from '../store/challengeStore';
 
 const TASKS = [
   { key: 'diet', label: 'Follow Diet', description: 'No alcohol or cheat meals', icon: 'nutrition' },
@@ -30,15 +31,20 @@ const TASKS = [
 ] as const;
 
 export default function HomeScreen() {
-  // Subscribe to store with selector for better performance
-  const currentDay = useChallengeStore((state) => state.currentDay);
-  const bestStreak = useChallengeStore((state) => state.bestStreak);
-  const totalResets = useChallengeStore((state) => state.totalResets);
-  const dailyLog = useChallengeStore((state) => state.dailyLog);
-  const toggleTask = useChallengeStore((state) => state.toggleTask);
-  const resetChallenge = useChallengeStore((state) => state.resetChallenge);
-  const checkAndAdvanceDay = useChallengeStore((state) => state.checkAndAdvanceDay);
-  const initializeDay = useChallengeStore((state) => state.initializeDay);
+  // Subscribe to entire store to ensure reactivity
+  const store = useChallengeStore();
+  
+  const {
+    currentDay,
+    bestStreak,
+    totalResets,
+    dailyLog,
+    _hasHydrated,
+    toggleTask,
+    resetChallenge,
+    checkAndAdvanceDay,
+    initializeDay,
+  } = store;
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -48,34 +54,31 @@ export default function HomeScreen() {
   const celebrationOpacity = useSharedValue(0);
 
   // Get today's date string
-  const getDateString = () => new Date().toISOString().split('T')[0];
-  const today = getDateString();
+  const today = useMemo(() => getDateString(), []);
   
   // Get today's tasks from store
-  const todaysTasks = dailyLog[today] || {
-    diet: false,
-    workout1: false,
-    workout2Outdoor: false,
-    water: false,
-    reading: false,
-    progressPhoto: false,
-    completedAt: null,
-  };
+  const todaysTasks = useMemo(() => {
+    return dailyLog[today] || createEmptyDayLog();
+  }, [dailyLog, today]);
 
-  // Initialize day on mount
+  // Initialize day on mount after hydration
   useEffect(() => {
-    initializeDay();
-  }, []);
+    if (_hasHydrated) {
+      initializeDay();
+    }
+  }, [_hasHydrated, initializeDay]);
 
   // Count completed tasks
-  const completedCount = [
-    todaysTasks.diet,
-    todaysTasks.workout1,
-    todaysTasks.workout2Outdoor,
-    todaysTasks.water,
-    todaysTasks.reading,
-    todaysTasks.progressPhoto,
-  ].filter(Boolean).length;
+  const completedCount = useMemo(() => {
+    return [
+      todaysTasks.diet,
+      todaysTasks.workout1,
+      todaysTasks.workout2Outdoor,
+      todaysTasks.water,
+      todaysTasks.reading,
+      todaysTasks.progressPhoto,
+    ].filter(Boolean).length;
+  }, [todaysTasks]);
 
   const allComplete = completedCount === 6;
   const wasComplete = todaysTasks.completedAt !== null;
@@ -83,35 +86,43 @@ export default function HomeScreen() {
   // Handle task toggle
   const handleToggleTask = useCallback(async (taskKey: keyof DailyTasks) => {
     if (Platform.OS !== 'web') {
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch {}
     }
+    
+    // Get current state before toggle
+    const currentTasks = useChallengeStore.getState().dailyLog[today];
+    const wasAlreadyComplete = currentTasks?.completedAt !== null;
     
     toggleTask(taskKey);
 
-    // Check for day completion after a brief delay
+    // Check for day completion after toggle
     setTimeout(() => {
-      const currentTasks = useChallengeStore.getState().dailyLog[today];
-      if (currentTasks) {
+      const updatedTasks = useChallengeStore.getState().dailyLog[today];
+      if (updatedTasks) {
         const nowComplete = 
-          currentTasks.diet &&
-          currentTasks.workout1 &&
-          currentTasks.workout2Outdoor &&
-          currentTasks.water &&
-          currentTasks.reading &&
-          currentTasks.progressPhoto;
+          updatedTasks.diet &&
+          updatedTasks.workout1 &&
+          updatedTasks.workout2Outdoor &&
+          updatedTasks.water &&
+          updatedTasks.reading &&
+          updatedTasks.progressPhoto;
 
-        if (nowComplete && !wasComplete) {
+        if (nowComplete && !wasAlreadyComplete) {
           triggerCelebration();
           checkAndAdvanceDay();
         }
       }
     }, 100);
-  }, [today, wasComplete, toggleTask, checkAndAdvanceDay]);
+  }, [today, toggleTask, checkAndAdvanceDay]);
 
   // Celebration animation
   const triggerCelebration = useCallback(async () => {
     if (Platform.OS !== 'web') {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } catch {}
     }
     setShowCelebration(true);
     celebrationScale.value = withSequence(
@@ -134,7 +145,9 @@ export default function HomeScreen() {
   // Handle reset
   const handleReset = useCallback(async () => {
     if (Platform.OS !== 'web') {
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      try {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } catch {}
     }
     resetChallenge();
     setShowResetModal(false);
@@ -142,6 +155,18 @@ export default function HomeScreen() {
 
   const displayDay = currentDay === 0 ? 1 : currentDay;
   const isChallengeComplete = currentDay >= 75 && allComplete;
+
+  // Show loading state while hydrating
+  if (!_hasHydrated) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#22c55e" />
+          <Text style={styles.loadingText}>Loading...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -201,7 +226,7 @@ export default function HomeScreen() {
           <Text style={styles.sectionTitle}>Today's Tasks</Text>
           
           {TASKS.map((task) => {
-            const isComplete = todaysTasks[task.key as keyof DailyTasks];
+            const isComplete = Boolean(todaysTasks[task.key as keyof DailyTasks]);
             return (
               <TouchableOpacity
                 key={task.key}
@@ -313,6 +338,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0a0a0a',
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    color: '#6b7280',
+    marginTop: 12,
+    fontSize: 16,
   },
   scrollContent: {
     padding: 20,
