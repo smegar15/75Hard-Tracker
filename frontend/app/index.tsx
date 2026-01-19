@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
-  Pressable,
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,7 +17,6 @@ import Animated, {
   withSpring,
   withSequence,
   withTiming,
-  runOnJS,
 } from 'react-native-reanimated';
 import { useChallengeStore, DailyTasks } from '../store/challengeStore';
 
@@ -32,40 +30,55 @@ const TASKS = [
 ] as const;
 
 export default function HomeScreen() {
-  const {
-    currentDay,
-    bestStreak,
-    totalResets,
-    toggleTask,
-    resetChallenge,
-    getTodaysTasks,
-    checkAndAdvanceDay,
-    initializeDay,
-  } = useChallengeStore();
+  // Subscribe to store with selector for better performance
+  const currentDay = useChallengeStore((state) => state.currentDay);
+  const bestStreak = useChallengeStore((state) => state.bestStreak);
+  const totalResets = useChallengeStore((state) => state.totalResets);
+  const dailyLog = useChallengeStore((state) => state.dailyLog);
+  const toggleTask = useChallengeStore((state) => state.toggleTask);
+  const resetChallenge = useChallengeStore((state) => state.resetChallenge);
+  const checkAndAdvanceDay = useChallengeStore((state) => state.checkAndAdvanceDay);
+  const initializeDay = useChallengeStore((state) => state.initializeDay);
 
   const [showResetModal, setShowResetModal] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
-  const [todaysTasks, setTodaysTasks] = useState<ReturnType<typeof getTodaysTasks>>(getTodaysTasks());
 
   // Animation values
   const celebrationScale = useSharedValue(0);
   const celebrationOpacity = useSharedValue(0);
 
-  // Update local state when store changes
+  // Get today's date string
+  const getDateString = () => new Date().toISOString().split('T')[0];
+  const today = getDateString();
+  
+  // Get today's tasks from store
+  const todaysTasks = dailyLog[today] || {
+    diet: false,
+    workout1: false,
+    workout2Outdoor: false,
+    water: false,
+    reading: false,
+    progressPhoto: false,
+    completedAt: null,
+  };
+
+  // Initialize day on mount
   useEffect(() => {
     initializeDay();
   }, []);
 
-  useEffect(() => {
-    setTodaysTasks(getTodaysTasks());
-  }, [getTodaysTasks]);
-
   // Count completed tasks
-  const completedCount = Object.entries(todaysTasks)
-    .filter(([key, value]) => key !== 'completedAt' && value === true)
-    .length;
+  const completedCount = [
+    todaysTasks.diet,
+    todaysTasks.workout1,
+    todaysTasks.workout2Outdoor,
+    todaysTasks.water,
+    todaysTasks.reading,
+    todaysTasks.progressPhoto,
+  ].filter(Boolean).length;
 
   const allComplete = completedCount === 6;
+  const wasComplete = todaysTasks.completedAt !== null;
 
   // Handle task toggle
   const handleToggleTask = useCallback(async (taskKey: keyof DailyTasks) => {
@@ -74,21 +87,26 @@ export default function HomeScreen() {
     }
     
     toggleTask(taskKey);
-    setTodaysTasks(getTodaysTasks());
 
-    // Check for day completion after toggle
+    // Check for day completion after a brief delay
     setTimeout(() => {
-      const tasks = getTodaysTasks();
-      const nowComplete = Object.entries(tasks)
-        .filter(([key, value]) => key !== 'completedAt' && value === true)
-        .length === 6;
+      const currentTasks = useChallengeStore.getState().dailyLog[today];
+      if (currentTasks) {
+        const nowComplete = 
+          currentTasks.diet &&
+          currentTasks.workout1 &&
+          currentTasks.workout2Outdoor &&
+          currentTasks.water &&
+          currentTasks.reading &&
+          currentTasks.progressPhoto;
 
-      if (nowComplete && !todaysTasks.completedAt) {
-        triggerCelebration();
-        checkAndAdvanceDay();
+        if (nowComplete && !wasComplete) {
+          triggerCelebration();
+          checkAndAdvanceDay();
+        }
       }
     }, 100);
-  }, [todaysTasks]);
+  }, [today, wasComplete, toggleTask, checkAndAdvanceDay]);
 
   // Celebration animation
   const triggerCelebration = useCallback(async () => {
@@ -119,12 +137,11 @@ export default function HomeScreen() {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     }
     resetChallenge();
-    setTodaysTasks(getTodaysTasks());
     setShowResetModal(false);
-  }, []);
+  }, [resetChallenge]);
 
   const displayDay = currentDay === 0 ? 1 : currentDay;
-  const isChallengComplete = currentDay >= 75 && allComplete;
+  const isChallengeComplete = currentDay >= 75 && allComplete;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -233,7 +250,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         {/* Challenge Complete Message */}
-        {isChallengComplete && (
+        {isChallengeComplete && (
           <View style={styles.completeMessage}>
             <Ionicons name="trophy" size={40} color="#fbbf24" />
             <Text style={styles.completeText}>CHALLENGE COMPLETE!</Text>
@@ -246,7 +263,7 @@ export default function HomeScreen() {
       {showCelebration && (
         <View style={styles.celebrationOverlay}>
           <Animated.View style={[styles.celebrationContent, celebrationAnimatedStyle]}>
-            <Text style={styles.celebrationEmoji}>🎉</Text>
+            <Ionicons name="ribbon" size={80} color="#22c55e" />
             <Text style={styles.celebrationTitle}>DAY COMPLETE!</Text>
             <Text style={styles.celebrationSubtitle}>You're crushing it!</Text>
           </Animated.View>
@@ -490,15 +507,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
-  celebrationEmoji: {
-    fontSize: 80,
-    marginBottom: 16,
-  },
   celebrationTitle: {
     fontSize: 32,
     fontWeight: '900',
     color: '#22c55e',
     letterSpacing: 2,
+    marginTop: 16,
   },
   celebrationSubtitle: {
     fontSize: 18,
